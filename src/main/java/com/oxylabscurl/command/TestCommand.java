@@ -14,7 +14,7 @@ import java.util.concurrent.Callable;
 @Slf4j
 @Component
 @CommandLine.Command(name = "test", description = "curl 封装 支持多次 curl 测试延迟.", mixinStandardHelpOptions = true)
-public class JcurlCommand  implements Callable<Integer> {
+public class TestCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
