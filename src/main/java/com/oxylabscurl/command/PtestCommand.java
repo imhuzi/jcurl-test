@@ -1,8 +1,11 @@
 package com.oxylabscurl.command;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oxylabscurl.shell.DelayInfo;
+import com.oxylabscurl.shell.IpInfo;
 import com.oxylabscurl.shell.ShellExec;
 import com.oxylabscurl.shell.ShellExecResult;
 import jakarta.annotation.Resource;
@@ -30,9 +33,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 @Component
 public class PtestCommand implements Callable<Integer> {
-    ObjectMapper mapper = new ObjectMapper();
+    static ObjectMapper mapper = new ObjectMapper();
+        static {
+	mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+	mapper.configure(JsonParser.Feature.INCLUDE_SOURCE_IN_LOCATION,false);
+	mapper.configure(JsonParser.Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
+	mapper.configure(JsonParser.Feature.ALLOW_SINGLE_QUOTES, true);
+	}
+
     // user,cc,sessid,sesstime,pass, url
     private String commond = "curl -w \"@curl-format.txt\" -x pr.oxylabs.io:7777 -U \"customer-%s-cc-%s-sessid-%s-sesstime-%s:%s\" -o /dev/null -s -L \"%s\"";
+
+    private String ipInfoCommond = "curl -x pr.oxylabs.io:7777 -U \"customer-%s-cc-%s-sessid-%s-sesstime-%s:%s\" -s -L \"%s\"";
 
     @CommandLine.Option(names = "-c", description = "test count", defaultValue = "3")
     private Integer testCount;
@@ -72,9 +84,13 @@ public class PtestCommand implements Callable<Integer> {
         List<DelayInfo> delayInfos = new ArrayList<>();
         getSessionIds(ipCount).forEach(sessid -> {
             // user,cc,sessid,sesstime,pass, url
+	    // get ipInfo
+	    IpInfo ipInfo = getIpInfo(sessid);
             Arrays.stream(urls.split(",")).forEach(url -> {
+		String[] urlArr = url.split(":", 2);
+		String _url = urlArr[1];
                 for (int i = 1; i <= testCount; i++) {
-                    String _command = String.format(commond, user, cc, sessid, sessionTime, pass, url);
+                    String _command = String.format(commond, user, cc, sessid, sessionTime, pass, _url);
                     log.debug("command:{}", _command);
                     ShellExecResult res = new ShellExec().exec(_command);
                     if (res.getExitCode() == 0) {
@@ -82,8 +98,19 @@ public class PtestCommand implements Callable<Integer> {
                             DelayInfo delayInfo = mapper.readValue(res.getStdout(), DelayInfo.class);
                             delayInfo.setSessid(sessid);
                             delayInfo.setCount(i);
-                            delayInfo.setUrl(url);
+                            delayInfo.setUrl(_url);
                             delayInfo.setCurl(_command);
+			    delayInfo.setTarget(urlArr[0]);
+			    if (ipInfo != null) {
+			       delayInfo.setIp(ipInfo.getIp());
+			       delayInfo.setCity(ipInfo.getCity());
+			       delayInfo.setRegion(ipInfo.getRegion());
+			       delayInfo.setCountry(ipInfo.getCountry());
+			       delayInfo.setLoc(ipInfo.getLoc());
+			       delayInfo.setOrg(ipInfo.getOrg());
+			       delayInfo.setPostal(ipInfo.getPostal());
+			       delayInfo.setTimezone(ipInfo.getTimezone());
+			    }
                             // 格式化 延时
                             System.out.printf("%s,%s,%s,%s,%s,%s,%s,%s\n", delayInfo.getSessid(), delayInfo.getCount(), delayInfo.getUrl(), delayInfo.getAppconnect(), delayInfo.getConnect(), delayInfo.getTotal(), delayInfo.getPretransfer(), delayInfo.getStarttransfer());
                             delayInfos.add(delayInfo);
@@ -116,5 +143,19 @@ public class PtestCommand implements Callable<Integer> {
         HSSFWorkbook workbook = (HSSFWorkbook) ExcelExportUtil.exportExcel(new ExportParams("Curl延迟测试结果", cc +"/区域的延迟测试,每个地址，一个sessid curl 3次", "sheet1"), DelayInfo.class, delayInfos);
         workbook.write(new File("./curl-result.xls"));
     }
+
+        private IpInfo getIpInfo(String sessid) {
+		String _command = String.format(ipInfoCommond, user, cc, sessid, sessionTime, pass, "https://ipinfo.io");
+		log.debug("ipInfo command:{}", _command);
+		ShellExecResult res = new ShellExec().exec(_command);
+		if (res.getExitCode() == 0) {
+		try {
+	             return mapper.readValue(res.getStdout(), IpInfo.class);
+		} catch (Exception e) {
+														                log.error("curl ipInfo exec to json error:{}", res, e);
+   																            }
+		}
+	        return null;
+	}
 
 }
